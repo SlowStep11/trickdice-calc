@@ -99,7 +99,7 @@
         </div>
 
         <span class="text-[11px] text-slate-400 hidden sm:inline">
-          초록 주사위는 숫자 뒤 <code class="text-emerald-400 font-mono">*</code> 입력 (예: <code class="text-slate-200 font-mono">0445*3</code>)
+          에르핀 눈 주사위는 숫자 뒤 <code class="text-emerald-400 font-mono">*</code> 입력 (예: <code class="text-slate-200 font-mono">0445*3</code>)
         </span>
       </div>
 
@@ -128,9 +128,9 @@
       <div class="pt-1">
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-[11px] font-semibold text-slate-400">
-            주사위 클릭: <span class="text-indigo-300">보관/해제 토글</span> · 우클릭(또는 하단 버튼): <span class="text-emerald-400">초록 주사위(*) 토글</span>
+            주사위 클릭: <span class="text-amber-300 font-bold">보관/해제 토글</span> · 우클릭(또는 하단 버튼): <span class="text-emerald-400">에르핀 눈 주사위(*) 토글</span>
           </span>
-          <button type="button" onclick="applyRecommendedHold()" class="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 underline underline-offset-2">
+          <button type="button" onclick="applyRecommendedHold()" class="text-[11px] font-bold text-amber-400 hover:text-amber-300 underline underline-offset-2">
             추천 보관 적용
           </button>
         </div>
@@ -154,7 +154,7 @@
       <!-- 3줄 핵심 지침 -->
       <div class="space-y-1.5 text-sm">
         <div class="flex items-start gap-2">
-          <span class="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold text-xs shrink-0 mt-0.5">보관</span>
+          <span class="px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-300 font-bold text-xs shrink-0 mt-0.5">보관</span>
           <p id="recHoldLine" class="font-bold text-white leading-snug">주사위 5개를 입력하면 최적 보관 조합을 계산합니다.</p>
         </div>
         <div class="flex items-start gap-2">
@@ -162,7 +162,7 @@
           <p id="recTargetLine" class="font-semibold text-slate-200 leading-snug">-</p>
         </div>
         <div class="flex items-start gap-2">
-          <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-xs shrink-0 mt-0.5">꼼수</span>
+          <span class="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 font-bold text-xs shrink-0 mt-0.5">꼼수</span>
           <p id="recCheatLine" class="font-semibold text-amber-200 leading-snug">-</p>
         </div>
       </div>
@@ -238,9 +238,9 @@
      * 트릭다이스 (Trickdice) 규칙 상수 및 상태 정의
      * - 8라운드 / 8개 족보:
      *   상단(5종): 듀스(2), 트레이(3), 포(4), 파이브(5), 식스(6) -> 합계 55점 이상 시 보너스 +40점
-     *   하단(3종): 풀하우스(5개 합, 최대 30점), 라지 스트레이트(30점), 요트(50점)
+     *   하단(3종): 풀하우스(5개 합, 최대 30점), 라지 스트레이트(30점 고정), 요트(50점)
      * - 조커(0): 에르핀 눈. 어떤 숫자로든 변환되어 해당 족보 최고 점수로 계산
-     * - 초록 주사위(*): 재굴림 시 조커(0) 등장 확률이 대폭 상승하는 특수 주사위
+     * - 에르핀 눈 주사위(*): 재굴림 시 에르핀 눈(0) 등장 확률이 대폭 상승하는 특수 주사위
      * - 꼼수(밑장 눈): 한 판에 총 2회 사용 가능, 한 라운드에 최대 1회 사용 가능
      */
     const CATEGORIES = [
@@ -273,12 +273,51 @@
     };
 
     // =========================================================================
-    // 1. 족보 점수 계산 엔진 (조커 0 완벽 처리)
+    // 1. 밑장 눈 가치(Tier) 및 기회비용 정밀 평가 모델 (고도화 엔진)
+    // =========================================================================
+    function getBottomDieOpportunityCost(bottomFace, roundsLeft, cheatsLeft, scores) {
+      // 밑장 눈 숫자(0~6)에 따른 기본 유보 기준(기회비용)
+      // 조커(0)와 6은 고득점·족보 완성 가치가 매우 높고, 2~3은 후반 갈수록 가치가 급락
+      const baseCostMap = {
+        0: 14.5, // 만능 에르핀 눈
+        6: 13.0, // 고득점 핵심
+        5: 10.5, // 상단 보너스·풀하우스
+        4: 8.5,  // 스트레이트·상단
+        3: 6.0,  // 초중반 처리용
+        2: 4.2,  // 아끼지 말고 소모
+        1: 3.0   // 즉시 이득 시 사용
+      };
+
+      let cost = baseCostMap[bottomFace] !== undefined ? baseCostMap[bottomFace] : 8.5;
+
+      // 해당 상단 족보(2~6)가 이미 채워져 있으면 밑장 가치가 하락 (단, 조커 0은 항상 유효)
+      const upperMap = { 2: 'twos', 3: 'threes', 4: 'fours', 5: 'fives', 6: 'sixes' };
+      if (bottomFace >= 2 && bottomFace <= 6) {
+        const targetUpperId = upperMap[bottomFace];
+        if (scores[targetUpperId] !== undefined) {
+          cost *= 0.62;
+        }
+      }
+
+      // 꼼수 잔여 횟수가 많거나 라운드가 얼마 남지 않았으면 기회비용 완화 (털어내야 함)
+      if (cheatsLeft >= roundsLeft) {
+        cost *= 0.25;
+      } else if (cheatsLeft === 2 && roundsLeft <= 3) {
+        cost *= 0.55;
+      } else if (roundsLeft <= 2) {
+        cost *= 0.50;
+      }
+
+      return cost;
+    }
+
+    // =========================================================================
+    // 2. 족보 점수 계산 엔진 (조커 0 & 라지 스트레이트 30점 고정 완벽 처리)
     // =========================================================================
     function scoreCategory(catId, vals) {
       if (!vals || vals.some(v => v === null || v === undefined)) return 0;
 
-      // 상단 족보: targetFace와 일치하는 주사위 + 조커(0) 개수 * targetFace
+      // 상단 족보: targetFace와 일치하는 주사위 + 에르핀 눈(0) 개수 * targetFace
       const cat = CATEGORIES.find(c => c.id === catId);
       if (cat && cat.section === 'upper') {
         const f = cat.targetFace;
@@ -305,7 +344,7 @@
         return 0;
       }
 
-      // 라지 스트레이트 (1-2-3-4-5 또는 2-3-4-5-6 -> 30점)
+      // 라지 스트레이트 (1-2-3-4-5 또는 2-3-4-5-6 -> 항상 30점 고정)
       if (catId === 'ls') {
         const straights = [
           [1, 2, 3, 4, 5],
@@ -324,11 +363,9 @@
       // 풀하우스 (3개 + 2개 동일 눈 -> 주사위 5개 총합, 조커는 최대 합이 되도록 배정)
       if (catId === 'fh') {
         let bestSum = 0;
-        // 가능한 모든 (트리플 눈 a, 페어 눈 b) 조합 탐색 (a === b인 요트 형태도 풀하우스 허용)
         for (let a = 1; a <= 6; a++) {
           for (let b = 1; b <= 6; b++) {
             if (a === b) {
-              // 5개 모두 같은 눈인 경우
               if (counts[a] + jokers >= 5) {
                 bestSum = Math.max(bestSum, a * 5);
               }
@@ -368,44 +405,48 @@
     }
 
     // =========================================================================
-    // 2. 전략 가치 평가 & 몬테카를로 기댓값(EV) 시뮬레이션 엔진
+    // 3. 전략 가치 평가 & 고정밀 몬테카를로 기댓값(EV) 시뮬레이션 엔진
     // =========================================================================
     function getUpperProgress() {
       let upperSum = 0;
       let openUpper = [];
+      let openUpperMaxPossible = 0;
       for (const c of CATEGORIES) {
         if (c.section === 'upper') {
           if (state.scores[c.id] !== undefined) {
             upperSum += state.scores[c.id];
           } else {
             openUpper.push(c);
+            openUpperMaxPossible += c.maxPts;
           }
         }
       }
-      return { upperSum, openUpper, bonusAchieved: upperSum >= 55 };
+      const bonusAchieved = upperSum >= 55;
+      const bonusPossible = bonusAchieved || (upperSum + openUpperMaxPossible >= 55);
+      return { upperSum, openUpper, bonusAchieved, bonusPossible };
     }
 
     /**
      * 특정 최종 주사위 눈 배열(vals)을 현재 열린 족보 중 하나에 등록할 때의
      * "전략적 종합 가치(Strategic Utility)"를 반환합니다.
-     * - 단순 점수뿐 아니라 상단 보너스(+40점) 달성 기여도, 족보 희소성, 꼼수 비용을 반영
      */
-    function evaluateFinalBoard(vals, openCats, upperSum, openUpperCount, cheatsLeft, bottomFace) {
+    function evaluateFinalBoard(vals, openCats, upperSum, openUpperCount, bonusPossible, cheatsLeft, bottomFace, scores) {
       let bestUtility = -Infinity;
       let bestPlan = null;
 
-      // 상단 보너스까지 남은 점수 및 남은 상단 칸의 기대 획득 가능 점수 추정
       const neededForBonus = Math.max(0, 55 - upperSum);
       const bonusAlreadyLocked = upperSum >= 55;
-
-      // 꼼수 1회당 기회비용 (후반일수록, 보너스/요트 결정적일수록 가치 상승)
       const roundsLeft = openCats.length;
-      const cheatOpportunityCost = cheatsLeft === 2 ? 9.5 : (roundsLeft <= 2 ? 4.0 : 12.0);
+
+      // 밑장 눈 숫자(0~6) 및 상단 개폐 여부에 따른 동적 꼼수 기회비용
+      const cheatOpportunityCost = getBottomDieOpportunityCost(bottomFace, roundsLeft, cheatsLeft, scores);
 
       for (const cat of openCats) {
         // 1) 꼼수 미사용 평가
         const rawScore = scoreCategory(cat.id, vals);
-        const utilNoCheat = computeCategoryUtility(cat, rawScore, upperSum, openUpperCount, bonusAlreadyLocked, neededForBonus, roundsLeft);
+        const utilNoCheat = computeCategoryUtility(
+          cat, rawScore, upperSum, openUpperCount, bonusAlreadyLocked, bonusPossible, neededForBonus, roundsLeft
+        );
 
         if (utilNoCheat > bestUtility) {
           bestUtility = utilNoCheat;
@@ -415,14 +456,18 @@
             score: rawScore,
             useCheat: false,
             utility: utilNoCheat,
+            opportunityCost: cheatOpportunityCost,
           };
         }
 
-        // 2) 꼼수 1회 사용 평가 (남은 꼼수가 1개 이상일 때)
+        // 2) 꼼수 1회 사용 평가
         if (cheatsLeft > 0) {
           const cheatRes = getBestCheatForCategory(cat.id, vals, bottomFace);
           if (cheatRes.score > rawScore) {
-            const utilWithCheat = computeCategoryUtility(cat, cheatRes.score, upperSum, openUpperCount, bonusAlreadyLocked, neededForBonus, roundsLeft) - cheatOpportunityCost;
+            const utilWithCheat = computeCategoryUtility(
+              cat, cheatRes.score, upperSum, openUpperCount, bonusAlreadyLocked, bonusPossible, neededForBonus, roundsLeft
+            ) - cheatOpportunityCost;
+
             if (utilWithCheat > bestUtility) {
               bestUtility = utilWithCheat;
               bestPlan = {
@@ -434,6 +479,7 @@
                 replaceIdx: cheatRes.replaceIdx,
                 replacedFrom: cheatRes.replacedFrom,
                 utility: utilWithCheat,
+                opportunityCost: cheatOpportunityCost,
               };
             }
           }
@@ -443,26 +489,26 @@
       return bestPlan;
     }
 
-    function computeCategoryUtility(cat, score, upperSum, openUpperCount, bonusAlreadyLocked, neededForBonus, roundsLeft) {
+    function computeCategoryUtility(cat, score, upperSum, openUpperCount, bonusAlreadyLocked, bonusPossible, neededForBonus, roundsLeft) {
       let utility = score;
 
       if (cat.section === 'upper') {
         const par = cat.targetFace * 3; // 기준치 (3개 = par)
         const diffFromPar = score - par;
 
-        if (!bonusAlreadyLocked) {
+        if (!bonusAlreadyLocked && bonusPossible) {
           if (upperSum + score >= 55) {
-            // 이 등록으로 상단 보너스 55점을 즉시 확정 짓는 경우
-            utility += 38.0;
+            // 이 등록으로 상단 보너스 55점을 즉시 확정 짓는 경우 (+40점 보너스)
+            utility += 40.0;
           } else if (openUpperCount === 1) {
             // 마지막 상단 칸인데 55점을 못 넘기면 보너스 40점 증발 패널티
             utility -= 28.0;
           } else {
-            // 기준치(3개) 대비 초과/미달분에 보너스 가중치 부여
-            utility += diffFromPar * 1.45;
-            // 0점 손절 방어: 기준치 절반 미만으로 등록할 때는 보너스 난이도 상승 패널티
+            // 진행도에 따른 동적 보너스 가중치 (55점에 가까워질수록 가치 상승)
+            const bonusWeight = Math.min(1.65, 1.15 + (upperSum / 55) * 0.5);
+            utility += diffFromPar * bonusWeight;
             if (score < cat.targetFace * 2) {
-              utility -= (cat.targetFace * 2 - score) * 1.1;
+              utility -= (cat.targetFace * 2 - score) * 1.15;
             }
           }
         }
@@ -470,9 +516,8 @@
         // 하단 족보 가치 보정
         if (cat.id === 'yacht') {
           if (score === 50) {
-            utility += 8.0; // 요트 완성 보너스 가산
+            utility += 8.0;
           } else {
-            // 요트를 0점으로 버리는 것은 다른 칸 0점보다 아쉬우나, 후반(1~2라운드 남음)에는 손절 허용
             utility -= roundsLeft > 2 ? 14.0 : 5.0;
           }
         } else if (cat.id === 'ls') {
@@ -486,21 +531,21 @@
       return utility;
     }
 
-    // 주사위 1개 샘플링 (초록 주사위는 조커 0 확률이 약 28%, 일반 주사위는 약 10%)
+    // 주사위 1개 샘플링 (에르핀 눈 주사위(*)는 조커 0 확률이 약 28%, 일반 주사위는 약 10%)
     function rollSingleDie(isGreen) {
       const r = Math.random();
       if (isGreen) {
-        if (r < 0.28) return 0; // 초록 주사위 조커 고확률
+        if (r < 0.28) return 0;
         return 1 + Math.floor(((r - 0.28) / 0.72) * 6);
       } else {
-        if (r < 0.10) return 0; // 일반 주사위 조커 기본 확률
+        if (r < 0.10) return 0;
         return 1 + Math.floor(((r - 0.10) / 0.90) * 6);
       }
     }
 
     /**
      * 현재 주사위 상태와 굴림 차수(1, 2, 3)를 바탕으로
-     * 32가지 보관(Hold) 마스크 중 최고 기댓값(EV) 전략을 계산
+     * 32가지 보관(Hold) 마스크 중 최고 기댓값(EV) 전략을 고정밀 계산
      */
     function analyzeOptimalMove() {
       const hasAllDice = state.dice.every(d => d.val !== null);
@@ -513,14 +558,16 @@
       const openCats = CATEGORIES.filter(c => state.scores[c.id] === undefined);
       if (openCats.length === 0) return;
 
-      const { upperSum, openUpper } = getUpperProgress();
+      const { upperSum, openUpper, bonusPossible } = getUpperProgress();
       const openUpperCount = openUpper.length;
       const vals = state.dice.map(d => d.val);
       const greens = state.dice.map(d => d.green);
 
       // 3차(최종) 굴림일 때는 더 이상 재굴림이 없으므로 즉시 최적 등록/꼼수 여부 결정
       if (state.rollStage >= 3) {
-        const finalPlan = evaluateFinalBoard(vals, openCats, upperSum, openUpperCount, state.cheatsLeft, state.bottomFace);
+        const finalPlan = evaluateFinalBoard(
+          vals, openCats, upperSum, openUpperCount, bonusPossible, state.cheatsLeft, state.bottomFace, state.scores
+        );
         state.lastRecommendation = {
           stage: 3,
           holdMask: [true, true, true, true, true],
@@ -531,24 +578,24 @@
         return;
       }
 
-      // 1차 또는 2차 굴림: 32가지 보관 조합(mask = 0..31) 시뮬레이션
-      const remainingRolls = 3 - state.rollStage; // 1차면 2번 남음, 2차면 1번 남음
-      const SIMS = remainingRolls === 1 ? 1400 : 900;
+      // 1차 또는 2차 굴림: 32가지 보관 조합(mask = 0..31) 고정밀 시뮬레이션 (1차: 3,000회 / 2차: 4,000회)
+      const remainingRolls = 3 - state.rollStage;
+      const SIMS = remainingRolls === 1 ? 4000 : 3000;
 
       let bestMask = 0;
       let bestEV = -Infinity;
       let bestSamplePlan = null;
 
       for (let mask = 0; mask < 32; mask++) {
-        // 재굴림할 인덱스 추출
         const rerollIndices = [];
         for (let i = 0; i < 5; i++) {
           if (((mask >> i) & 1) === 0) rerollIndices.push(i);
         }
 
-        // 5개 모두 보관(mask === 31)인 경우 시뮬레이션 불필요
         if (rerollIndices.length === 0) {
-          const plan = evaluateFinalBoard(vals, openCats, upperSum, openUpperCount, state.cheatsLeft, state.bottomFace);
+          const plan = evaluateFinalBoard(
+            vals, openCats, upperSum, openUpperCount, bonusPossible, state.cheatsLeft, state.bottomFace, state.scores
+          );
           if (plan.utility > bestEV) {
             bestEV = plan.utility;
             bestMask = mask;
@@ -564,16 +611,14 @@
           const simVals = [...vals];
 
           if (remainingRolls === 1) {
-            // 2차 -> 3차: 남은 1번만 굴리고 최종 평가
             for (const idx of rerollIndices) {
               simVals[idx] = rollSingleDie(greens[idx]);
             }
           } else {
-            // 1차 -> 2차 -> 3차: 1회 굴린 뒤 휴리스틱으로 유망 눈을 추가 홀드하고 1회 더 굴림
             for (const idx of rerollIndices) {
               simVals[idx] = rollSingleDie(greens[idx]);
             }
-            const intermediateHold = quickHeuristicHold(simVals, openCats, upperSum);
+            const intermediateHold = quickHeuristicHold(simVals, openCats, upperSum, bonusPossible);
             for (let idx = 0; idx < 5; idx++) {
               if (!intermediateHold[idx]) {
                 simVals[idx] = rollSingleDie(greens[idx]);
@@ -581,7 +626,9 @@
             }
           }
 
-          const plan = evaluateFinalBoard(simVals, openCats, upperSum, openUpperCount, state.cheatsLeft, state.bottomFace);
+          const plan = evaluateFinalBoard(
+            simVals, openCats, upperSum, openUpperCount, bonusPossible, state.cheatsLeft, state.bottomFace, state.scores
+          );
           totalUtil += plan.utility;
           categoryFreq[plan.catId] = (categoryFreq[plan.catId] || 0) + 1;
         }
@@ -590,7 +637,6 @@
         if (avgEV > bestEV) {
           bestEV = avgEV;
           bestMask = mask;
-          // 가장 빈번하게 달성되는 목표 족보 추출
           let topCatId = openCats[0].id;
           let topCount = -1;
           for (const [cid, cnt] of Object.entries(categoryFreq)) {
@@ -618,10 +664,10 @@
       renderRecommendation();
     }
 
-    // 1차 -> 2차 시뮬레이션 내부에서 빠른 의사결정을 돕는 경량 휴리스틱 홀드
-    function quickHeuristicHold(vals, openCats, upperSum) {
+    // 1차 -> 2차 시뮬레이션 내부에서 정밀 의사결정을 돕는 스마트 휴리스틱 홀드
+    function quickHeuristicHold(vals, openCats, upperSum, bonusPossible) {
       const hold = [false, false, false, false, false];
-      // 조커(0)는 무조건 보관
+      // 에르핀 눈(0)은 무조건 보관
       for (let i = 0; i < 5; i++) {
         if (vals[i] === 0) hold[i] = true;
       }
@@ -644,7 +690,7 @@
         }
       }
 
-      // 가장 개수가 많은 눈(동률이면 큰 눈 또는 열린 상단 눈) 보관
+      // 가장 개수가 많은 눈(동률이면 열린 상단 눈·보너스 기여도·큰 눈 우선) 보관
       const counts = [0, 0, 0, 0, 0, 0, 0];
       vals.forEach(v => { if (v > 0) counts[v]++; });
       let bestFace = 6;
@@ -652,23 +698,38 @@
       for (let f = 1; f <= 6; f++) {
         if (counts[f] === 0) continue;
         const isUpperOpen = openCats.some(c => c.targetFace === f);
-        const weight = counts[f] * 10 + (isUpperOpen ? 4 : 0) + f * 0.3;
+        const bonusBoost = (isUpperOpen && bonusPossible && upperSum < 55) ? 4.5 : (isUpperOpen ? 2.5 : 0);
+        const weight = counts[f] * 10 + bonusBoost + f * 0.35;
         if (weight > bestScore) {
           bestScore = weight;
           bestFace = f;
         }
       }
+
       for (let i = 0; i < 5; i++) {
         if (vals[i] === bestFace || vals[i] === 0) hold[i] = true;
       }
+
+      // 풀하우스가 열려 있고 메인 눈이 2~3개 모였을 때 보조 페어가 있으면 함께 보관
+      const hasFH = openCats.some(c => c.id === 'fh');
+      if (hasFH && counts[bestFace] >= 2) {
+        for (let f2 = 6; f2 >= 1; f2--) {
+          if (f2 !== bestFace && counts[f2] >= 2) {
+            for (let i = 0; i < 5; i++) {
+              if (vals[i] === f2) hold[i] = true;
+            }
+            break;
+          }
+        }
+      }
+
       return hold;
     }
 
     // =========================================================================
-    // 3. 키보드 & 입력 파싱 핸들러
+    // 4. 키보드 & 입력 파싱 핸들러
     // =========================================================================
     function parseDiceTokens(rawStr) {
-      // 공백/쉼표 제거 후 숫자(0~6)와 뒤따르는 '*' 파싱
       const cleaned = rawStr.replace(/[\s,/-]+/g, '');
       const tokens = [];
       for (let i = 0; i < cleaned.length; i++) {
@@ -692,10 +753,8 @@
       const unheldCount = 5 - heldCount;
 
       if (tokens.length === 5) {
-        // 5개 전체 새로 입력
         state.dice = tokens.map(t => ({ val: t.val, green: t.green, held: false }));
       } else if (heldCount > 0 && tokens.length === unheldCount) {
-        // 보관된 주사위는 유지하고, 재굴림(보관 해제)된 자리만 새 눈으로 채움 + 차수 자동 증가
         let tIdx = 0;
         for (let i = 0; i < 5; i++) {
           if (!state.dice[i].held) {
@@ -711,7 +770,6 @@
           state.rollStage++;
         }
       } else {
-        // 길이가 맞지 않으면 앞부분부터 채우되 안내 표시
         for (let i = 0; i < Math.min(5, tokens.length); i++) {
           state.dice[i] = { val: tokens[i].val, green: tokens[i].green, held: false };
         }
@@ -720,7 +778,6 @@
       input.value = '';
       analyzeOptimalMove();
 
-      // 계산 직후 추천 보관 마스크를 주사위 슬롯에 자동 반영해 다음 재굴림 입력 준비!
       if (state.rollStage < 3 && state.lastRecommendation && state.lastRecommendation.holdMask) {
         for (let i = 0; i < 5; i++) {
           state.dice[i].held = state.lastRecommendation.holdMask[i];
@@ -757,14 +814,13 @@
     }
 
     // =========================================================================
-    // 4. 족보 등록 & 라운드 진행 로직
+    // 5. 족보 등록 & 라운드 진행 로직
     // =========================================================================
     function recordCategoryScore(catId, useCheat = false) {
       if (state.scores[catId] !== undefined) return;
       const vals = state.dice.map(d => d.val);
       if (vals.some(v => v === null)) return;
 
-      // 실행취소용 스냅샷 저장
       state.history.push(JSON.parse(JSON.stringify({
         scores: state.scores,
         cheatUsedRounds: state.cheatUsedRounds,
@@ -785,7 +841,6 @@
 
       state.scores[catId] = finalScore;
 
-      // 다음 라운드 초기화
       state.rollStage = 1;
       state.dice = [
         { val: null, green: false, held: false },
@@ -801,7 +856,6 @@
       input.value = '';
       input.focus();
 
-      // 8라운드 모두 완료 시 결과 모달 표시
       if (Object.keys(state.scores).length === 8) {
         showFinishSummary();
       }
@@ -820,7 +874,7 @@
     }
 
     // =========================================================================
-    // 5. UI 컨트롤 & 렌더링 함수
+    // 6. UI 컨트롤 & 렌더링 함수
     // =========================================================================
     function setBottomFace(face) {
       state.bottomFace = face;
@@ -830,7 +884,7 @@
     }
 
     function cycleCheatCount() {
-      state.cheatsLeft = (state.cheatsLeft + 2) % 3; // 2 -> 1 -> 0 -> 2
+      state.cheatsLeft = (state.cheatsLeft + 2) % 3;
       analyzeOptimalMove();
       renderAll();
     }
@@ -852,9 +906,9 @@
       if (hasAll && heldCount > 0 && unheldCount > 0 && state.rollStage < 3) {
         input.placeholder = `재굴림 ${unheldCount}개만 입력 (예: ${'4'.repeat(unheldCount)}) 또는 5개 전체`;
         badge.textContent = `${unheldCount}개 입력`;
-        badge.className = 'absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/25 text-indigo-300 font-bold';
+        badge.className = 'absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-300 font-bold';
       } else {
-        input.placeholder = '주사위 5개 입력 (예: 04453, 초록은 4*) + Enter';
+        input.placeholder = '주사위 5개 입력 (예: 04453, 에르핀 눈 주사위는 4*) + Enter';
         badge.textContent = '5개 입력';
         badge.className = 'absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400';
       }
@@ -865,7 +919,6 @@
       const currentRound = Math.min(8, completed + 1);
       document.getElementById('roundBadge').textContent = `${currentRound} / 8 라운드`;
 
-      // 밑장 눈 버튼 0~6
       const bfGroup = document.getElementById('bottomFaceGroup');
       bfGroup.innerHTML = [0, 1, 2, 3, 4, 5, 6].map(num => {
         const active = state.bottomFace === num;
@@ -877,15 +930,12 @@
           }">${num}</button>`;
       }).join('');
 
-      // 남은 꼼수 표시
       const filled = '●'.repeat(state.cheatsLeft);
       const empty = '○'.repeat(2 - state.cheatsLeft);
       document.getElementById('cheatDots').textContent = filled + empty;
 
-      // 실행취소 버튼 상태
       document.getElementById('undoBtn').disabled = state.history.length === 0;
 
-      // 굴림 차수 버튼 스타일
       document.querySelectorAll('.roll-stage-btn').forEach(btn => {
         const st = parseInt(btn.dataset.stage, 10);
         if (st === state.rollStage) {
@@ -904,10 +954,11 @@
         const isEmpty = d.val === null;
         const isRecHold = !isEmpty && recHold[idx] && state.rollStage < 3;
 
+        // 보관 중인 주사위는 원색(선명한 황금/노란색 테두리 + 링 + 원색 배지)으로 확 띄게 강조
         let borderClass = 'border-slate-800 bg-slate-950/70';
         if (!isEmpty) {
           if (d.held) {
-            borderClass = 'border-indigo-500 bg-indigo-950/50 shadow-md shadow-indigo-950/40';
+            borderClass = 'border-amber-400 bg-amber-500/20 ring-2 ring-amber-400 shadow-lg shadow-amber-500/30';
           } else if (d.green) {
             borderClass = 'border-emerald-500/70 bg-emerald-950/25';
           } else {
@@ -916,20 +967,29 @@
         }
 
         const faceLabel = isEmpty ? '-' : (d.val === 0 ? '0' : d.val);
-        const faceColor = d.val === 0
-          ? 'text-amber-300'
-          : (d.green ? 'text-emerald-300' : 'text-white');
+        // 보관 중인 주사위 숫자도 강렬한 원색 옐로우(#fde047)로 대비 극대화
+        const faceColor = d.held
+          ? 'text-yellow-300 drop-shadow-[0_0_8px_rgba(250,204,21,0.55)]'
+          : (d.val === 0
+              ? 'text-amber-300'
+              : (d.green ? 'text-emerald-300' : 'text-white'));
 
         return `
           <div onclick="toggleDieHold(${idx})" oncontextmenu="toggleDieGreen(${idx}, event)"
-            class="die-card cursor-pointer rounded-xl border-2 ${borderClass} p-2 flex flex-col items-center justify-between relative min-h-[76px]">
+            class="die-card cursor-pointer rounded-xl border-2 ${borderClass} p-2 flex flex-col items-center justify-between relative min-h-[78px]">
             
             <!-- 상단 상태 뱃지 (보관 / 재굴림) -->
-            <div class="w-full flex items-center justify-between text-[10px] font-bold">
-              <span class="${d.held ? 'text-indigo-300' : 'text-slate-500'}">
+            <div class="w-full flex items-center justify-between text-[10px] font-extrabold">
+              <span class="${
+                isEmpty
+                  ? 'text-slate-500'
+                  : (d.held
+                      ? 'px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 shadow-xs'
+                      : 'text-slate-400')
+              }">
                 ${isEmpty ? `#${idx + 1}` : (d.held ? '보관' : '굴림')}
               </span>
-              ${isRecHold ? '<span class="px-1 rounded bg-indigo-500/30 text-indigo-200 text-[9px]">추천</span>' : ''}
+              ${isRecHold ? '<span class="px-1 rounded bg-rose-500 text-white text-[9px] font-extrabold shadow-xs">추천</span>' : ''}
             </div>
 
             <!-- 중앙 주사위 눈 -->
@@ -937,14 +997,14 @@
               ${faceLabel}${!isEmpty && d.green ? '<span class="text-emerald-400 text-base align-top">*</span>' : ''}
             </div>
 
-            <!-- 하단 초록 주사위 토글 버튼 -->
+            <!-- 하단 에르핀 눈 주사위 토글 버튼 -->
             <button type="button" onclick="event.stopPropagation(); toggleDieGreen(${idx})"
               class="w-full py-0.5 rounded text-[10px] font-bold transition ${
                 d.green
-                  ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40'
+                  ? 'bg-emerald-500 text-slate-950 font-extrabold'
                   : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
               }">
-              ${d.green ? '초록(*)' : '일반'}
+              ${d.green ? '에르핀(*)' : '일반'}
             </button>
           </div>
         `;
@@ -971,20 +1031,18 @@
       evEl.textContent = `기댓값 ${rec.ev.toFixed(1)}점`;
 
       if (rec.stage >= 3 && rec.finalPlan) {
-        // 3차(최종) 굴림 결과 지침
         const p = rec.finalPlan;
-        holdEl.innerHTML = `<span class="text-emerald-400">[최종 등록]</span> 아래 점수판에서 <span class="underline decoration-indigo-400 underline-offset-2 text-indigo-300">${p.catName} (${p.score}점)</span> 칸을 클릭하세요.`;
+        holdEl.innerHTML = `<span class="text-emerald-400">[최종 등록]</span> 아래 점수판에서 <span class="underline decoration-amber-400 underline-offset-2 text-amber-300">${p.catName} (${p.score}점)</span> 칸을 클릭하세요.`;
         targetEl.textContent = `${p.catName} 확정 (${p.score}점)`;
 
         if (p.useCheat) {
-          cheatEl.innerHTML = `<span class="text-amber-300 font-extrabold">꼼수 1회 사용!</span> [${p.replacedFrom}] 눈을 밑장 [${state.bottomFace}]으로 교체 (${p.rawScore}점 → ${p.score}점)`;
+          cheatEl.innerHTML = `<span class="text-orange-400 font-extrabold">꼼수 1회 사용!</span> [${p.replacedFrom}] 눈을 밑장 [${state.bottomFace}]으로 교체 (${p.rawScore}점 → ${p.score}점)`;
         } else {
           cheatEl.textContent = state.cheatsLeft > 0
-            ? `꼼수 아끼기 (남은 ${state.cheatsLeft}회 온존)`
+            ? `꼼수 아끼기 (남은 ${state.cheatsLeft}회 · 밑장 ${state.bottomFace} 기준 +${p.opportunityCost.toFixed(1)}점 이상 이득 시 사용)`
             : '꼼수 소진 상태 — 그대로 등록';
         }
       } else {
-        // 1차 또는 2차 굴림 보관 지침
         const kept = [];
         const rerolled = [];
         state.dice.forEach((d, idx) => {
@@ -996,7 +1054,7 @@
         const keptStr = kept.length > 0 ? kept.join(', ') : '없음 (5개 전부 재굴림)';
         const rerollStr = rerolled.length > 0 ? `${rerolled.join(', ')} (${rerolled.length}개 다시 굴리기)` : '재굴림 없음 (그대로 확정)';
 
-        holdEl.innerHTML = `<span class="text-indigo-300">[${keptStr}]</span> 보관 · <span class="text-slate-400 text-xs">${rerollStr}</span>`;
+        holdEl.innerHTML = `<span class="text-yellow-300 font-extrabold">[${keptStr}]</span> 보관 · <span class="text-slate-400 text-xs">${rerollStr}</span>`;
         targetEl.textContent = rec.targetPlan
           ? `${rec.targetPlan.catName} 주력 (달성 유력도 ${rec.targetPlan.prob}%)`
           : '-';
@@ -1018,7 +1076,6 @@
       }
       const totalScore = upperSum + bonusPoints + lowerSum;
 
-      // 상단 보너스 바 업데이트
       document.getElementById('upperSumText').textContent = upperSum;
       document.getElementById('totalScoreText').textContent = totalScore;
 
@@ -1044,7 +1101,6 @@
         }
       }
 
-      // 8개 족보 카드 렌더링
       const grid = document.getElementById('scorecardGrid');
       const hasDice = state.dice.every(d => d.val !== null);
       const vals = state.dice.map(d => d.val);
@@ -1069,7 +1125,6 @@
           `;
         }
 
-        // 미등록 칸: 현재 주사위 기준 즉시 획득 가능 점수 계산
         const rawPreview = hasDice ? scoreCategory(cat.id, vals) : null;
         const cheatPreview = (hasDice && state.cheatsLeft > 0)
           ? getBestCheatForCategory(cat.id, vals, state.bottomFace).score
@@ -1122,7 +1177,7 @@
     }
 
     // =========================================================================
-    // 6. 모달 및 전역 단축키 설정
+    // 7. 모달 및 전역 단축키 설정
     // =========================================================================
     function openResetModal() {
       const m = document.getElementById('resetModal');
@@ -1140,7 +1195,7 @@
       closeResetModal();
       closeFinishModal();
       state = {
-        bottomFace: state.bottomFace, // 밑장 눈 설정은 유지하거나 필요시 변경
+        bottomFace: state.bottomFace,
         cheatsLeft: 2,
         rollStage: 1,
         dice: [
@@ -1180,7 +1235,6 @@
       m.classList.remove('flex');
     }
 
-    // Alt + 0~6 단축키로 밑장 눈 즉시 변경
     window.addEventListener('keydown', (e) => {
       if (e.altKey && e.key >= '0' && e.key <= '6') {
         e.preventDefault();
@@ -1188,7 +1242,6 @@
       }
     });
 
-    // 초기 렌더링 및 입력창 포커스
     window.onload = () => {
       renderAll();
       document.getElementById('diceInput').focus();
