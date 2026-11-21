@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>트릭다이스 최적 계산기</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body {
+      background-color: #090d16;
+      color: #f1f5f9;
+      user-select: none;
+    }
+    .die-card {
+      transition: all 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .die-card:active {
+      transform: scale(0.95);
+    }
+    /* Custom subtle scrollbar for compact side-window mode */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-start p-2.5 sm:p-4">
+
+  <div class="w-full max-w-xl space-y-2.5">
+    
+    <!-- 상단 컨트롤 바: 라운드 / 밑장 눈 / 남은 꼼수 / 실행취소 / 새 게임 -->
+    <header class="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+      <div class="flex items-center gap-2">
+        <span class="px-2 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 font-bold text-xs tracking-tight" id="roundBadge">
+          1 / 8 라운드
+        </span>
+        <!-- 밑장(꼼수) 눈 선택기 -->
+        <div class="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1">
+          <span class="text-[11px] text-slate-400 font-semibold mr-1">밑장</span>
+          <div id="bottomFaceGroup" class="flex items-center gap-1">
+            <!-- JS로 0~6 버튼 렌더링 -->
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <!-- 남은 꼼수 버튼 -->
+        <button id="cheatCountBtn" onclick="cycleCheatCount()" title="클릭하여 남은 꼼수 횟수 조정 (게임당 최대 2회, 라운드당 최대 1회)"
+          class="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 hover:bg-amber-500/25 font-bold text-xs flex items-center gap-1.5 transition">
+          <span>꼼수</span>
+          <span id="cheatDots" class="font-mono text-sm tracking-tighter">●●</span>
+        </button>
+
+        <!-- 실행취소 -->
+        <button id="undoBtn" onclick="undoLastAction()" disabled
+          class="px-2 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-35 disabled:pointer-events-none text-xs font-semibold transition">
+          되돌리기
+        </button>
+
+        <!-- 새 게임 -->
+        <button onclick="openResetModal()"
+          class="px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 hover:bg-rose-500/25 text-xs font-bold transition">
+          새 게임
+        </button>
+      </div>
+    </header>
+
+    <!-- 초고속 키보드 입력 패널 -->
+    <section class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-lg space-y-2.5">
+      <div class="flex items-center justify-between gap-2">
+        <!-- 굴림 차수 스텝퍼 -->
+        <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800" id="rollStepGroup">
+          <button onclick="setRollStage(1)" data-stage="1" class="roll-stage-btn px-2.5 py-1 rounded-md text-xs font-bold transition">1차 굴림</button>
+          <button onclick="setRollStage(2)" data-stage="2" class="roll-stage-btn px-2.5 py-1 rounded-md text-xs font-bold transition">2차 굴림</button>
+          <button onclick="setRollStage(3)" data-stage="3" class="roll-stage-btn px-2.5 py-1 rounded-md text-xs font-bold transition">3차(최종)</button>
+        </div>
+
+        <span class="text-[11px] text-slate-400 hidden sm:inline">
+          초록 주사위는 숫자 뒤 <code class="text-emerald-400 font-mono">*</code> 입력 (예: <code class="text-slate-200 font-mono">0445*3</code>)
+        </span>
+      </div>
+
+      <!-- 메인 입력 인풋 -->
+      <form id="diceForm" onsubmit="handleDiceSubmit(event)" class="flex gap-2">
+        <div class="relative flex-1">
+          <input
+            id="diceInput"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="숫자 5개 (예: 04453) 또는 재굴림 눈만 입력 후 Enter"
+            class="w-full bg-slate-950 border-2 border-slate-700 focus:border-indigo-500 rounded-xl px-3.5 py-2.5 font-mono text-base sm:text-lg font-bold tracking-widest text-white placeholder:text-slate-500 placeholder:font-sans placeholder:text-xs placeholder:tracking-normal focus:outline-none transition"
+          />
+          <span id="inputHintBadge" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+            5개 입력
+          </span>
+        </div>
+        <button type="submit"
+          class="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold text-sm shadow-md shadow-indigo-950/50 transition shrink-0">
+          계산 ↵
+        </button>
+      </form>
+
+      <!-- 현재 주사위 5개 인터랙티브 슬롯 -->
+      <div class="pt-1">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[11px] font-semibold text-slate-400">
+            주사위 클릭: <span class="text-indigo-300">보관/해제 토글</span> · 우클릭(또는 하단 버튼): <span class="text-emerald-400">초록 주사위(*) 토글</span>
+          </span>
+          <button type="button" onclick="applyRecommendedHold()" class="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 underline underline-offset-2">
+            추천 보관 적용
+          </button>
+        </div>
+
+        <div id="diceBoard" class="grid grid-cols-5 gap-2">
+          <!-- JS로 5개 주사위 슬롯 렌더링 -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 3줄 초압축 AI 최적 추천 배너 -->
+    <section id="recommendationPanel" class="bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/40 border border-indigo-500/40 rounded-xl p-3.5 shadow-xl space-y-2">
+      <div class="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+        <div class="flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <h2 class="text-xs font-extrabold uppercase tracking-wider text-indigo-300">최적 수순 분석 (기댓값 기반)</h2>
+        </div>
+        <span id="evMetric" class="font-mono text-xs font-bold text-slate-300">기댓값 --</span>
+      </div>
+
+      <!-- 3줄 핵심 지침 -->
+      <div class="space-y-1.5 text-sm">
+        <div class="flex items-start gap-2">
+          <span class="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold text-xs shrink-0 mt-0.5">보관</span>
+          <p id="recHoldLine" class="font-bold text-white leading-snug">주사위 5개를 입력하면 최적 보관 조합을 계산합니다.</p>
+        </div>
+        <div class="flex items-start gap-2">
+          <span class="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold text-xs shrink-0 mt-0.5">목표</span>
+          <p id="recTargetLine" class="font-semibold text-slate-200 leading-snug">-</p>
+        </div>
+        <div class="flex items-start gap-2">
+          <span class="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-xs shrink-0 mt-0.5">꼼수</span>
+          <p id="recCheatLine" class="font-semibold text-amber-200 leading-snug">-</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 점수판 & 상단 보너스 트래커 -->
+    <section class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-lg space-y-2.5">
+      <!-- 상단 보너스 진행 게이지 -->
+      <div class="bg-slate-950/90 border border-slate-800/90 rounded-lg p-2.5 space-y-1.5">
+        <div class="flex items-center justify-between text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="font-bold text-slate-200">상단 보너스 (+40점)</span>
+            <span id="upperBonusStatus" class="px-1.5 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-slate-300">55점 필요</span>
+          </div>
+          <div class="font-mono font-bold text-xs">
+            <span id="upperSumText" class="text-indigo-300">0</span>
+            <span class="text-slate-500"> / 55점</span>
+          </div>
+        </div>
+        <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div id="upperProgressBar" class="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-300" style="width: 0%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] text-slate-400">
+          <span id="upperPaceText">남은 상단 5칸 평균 11.0점 필요</span>
+          <span class="font-bold text-white">총점: <span id="totalScoreText" class="font-mono text-sm text-emerald-400">0</span>점</span>
+        </div>
+      </div>
+
+      <!-- 8개 족보 등록 그리드 (클릭 시 즉시 점수 확정 & 다음 라운드 진행) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5" id="scorecardGrid">
+        <!-- JS로 8개 카테고리 렌더링 -->
+      </div>
+    </section>
+
+    <!-- 단축키 안내 푸터 -->
+    <footer class="text-center text-[11px] text-slate-500 pb-2">
+      단축키: <code class="text-slate-400">숫자 5개+Enter</code> 즉시 계산 · <code class="text-slate-400">Alt+0~6</code> 밑장 변경 · 족보 클릭 시 즉시 등록 및 다음 라운드
+    </footer>
+  </div>
+
+  <!-- 커스텀 확인 모달 (alert/confirm 대체) -->
+  <div id="resetModal" class="fixed inset-0 bg-black/75 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-xs w-full p-4 space-y-3 shadow-2xl">
+      <h3 class="text-base font-extrabold text-white">새 게임을 시작할까요?</h3>
+      <p class="text-xs text-slate-300 leading-relaxed">현재 기록된 점수와 남은 꼼수 횟수가 모두 초기화됩니다.</p>
+      <div class="flex justify-end gap-2 pt-1">
+        <button onclick="closeResetModal()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold">취소</button>
+        <button onclick="confirmResetGame()" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold">초기화</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 게임 종료 요약 모달 -->
+  <div id="finishModal" class="fixed inset-0 bg-black/80 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+    <div class="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-center">
+      <div class="inline-flex px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-extrabold">
+        8라운드 완주!
+      </div>
+      <div>
+        <div class="text-xs text-slate-400 font-semibold">최종 합계 점수</div>
+        <div id="finalTotalScore" class="text-4xl font-mono font-extrabold text-white mt-1">0점</div>
+        <div id="finalBreakdown" class="text-xs text-slate-400 mt-1.5">상단 0점 + 보너스 0점 + 하단 0점</div>
+      </div>
+      <div class="flex gap-2 justify-center pt-1">
+        <button onclick="closeFinishModal()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold">점수판 보기</button>
+        <button onclick="confirmResetGame()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">새 판 시작</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * 트릭다이스 (Trickdice) 규칙 상수 및 상태 정의
+     * - 8라운드 / 8개 족보:
+     *   상단(5종): 듀스(2), 트레이(3), 포(4), 파이브(5), 식스(6) -> 합계 55점 이상 시 보너스 +40점
+     *   하단(3종): 풀하우스(5개 합, 최대 30점), 라지 스트레이트(30점), 요트(50점)
+     * - 조커(0): 에르핀 눈. 어떤 숫자로든 변환되어 해당 족보 최고 점수로 계산
+     * - 초록 주사위(*): 재굴림 시 조커(0) 등장 확률이 대폭 상승하는 특수 주사위
+     * - 꼼수(밑장 눈): 한 판에 총 2회 사용 가능, 한 라운드에 최대 1회 사용 가능
+     */
+    const CATEGORIES = [
+      { id: 'twos',   name: '듀스',          short: '2',  section: 'upper', targetFace: 2, maxPts: 10 },
+      { id: 'threes', name: '트레이',        short: '3',  section: 'upper', targetFace: 3, maxPts: 15 },
+      { id: 'fours',  name: '포',            short: '4',  section: 'upper', targetFace: 4, maxPts: 20 },
+      { id: 'fives',  name: '파이브',        short: '5',  section: 'upper', targetFace: 5, maxPts: 25 },
+      { id: 'sixes',  name: '식스',          short: '6',  section: 'upper', targetFace: 6, maxPts: 30 },
+      { id: 'fh',     name: '풀하우스',      short: 'FH', section: 'lower', maxPts: 30 },
+      { id: 'ls',     name: '라지스트레이트', short: 'LS', section: 'lower', maxPts: 30 },
+      { id: 'yacht',  name: '요트',          short: 'YT', section: 'lower', maxPts: 50 },
+    ];
+
+    // 애플리케이션 전역 상태
+    let state = {
+      bottomFace: 6,          // 밑장(꼼수) 눈 (기본 6)
+      cheatsLeft: 2,          // 남은 꼼수 횟수 (최대 2)
+      rollStage: 1,           // 현재 라운드 굴림 차수 (1, 2, 3)
+      dice: [
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+      ],
+      scores: {},             // { categoryId: number }
+      cheatUsedRounds: {},    // { categoryId: boolean }
+      history: [],            // 실행취소 스택
+      lastRecommendation: null,
+    };
+
+    // =========================================================================
+    // 1. 족보 점수 계산 엔진 (조커 0 완벽 처리)
+    // =========================================================================
+    function scoreCategory(catId, vals) {
+      if (!vals || vals.some(v => v === null || v === undefined)) return 0;
+
+      // 상단 족보: targetFace와 일치하는 주사위 + 조커(0) 개수 * targetFace
+      const cat = CATEGORIES.find(c => c.id === catId);
+      if (cat && cat.section === 'upper') {
+        const f = cat.targetFace;
+        let count = 0;
+        for (let i = 0; i < 5; i++) {
+          if (vals[i] === f || vals[i] === 0) count++;
+        }
+        return count * f;
+      }
+
+      // 조커 개수 및 일반 눈 카운트
+      let jokers = 0;
+      const counts = [0, 0, 0, 0, 0, 0, 0];
+      for (let i = 0; i < 5; i++) {
+        if (vals[i] === 0) jokers++;
+        else counts[vals[i]]++;
+      }
+
+      // 요트 (5 of a kind -> 50점)
+      if (catId === 'yacht') {
+        for (let f = 1; f <= 6; f++) {
+          if (counts[f] + jokers >= 5) return 50;
+        }
+        return 0;
+      }
+
+      // 라지 스트레이트 (1-2-3-4-5 또는 2-3-4-5-6 -> 30점)
+      if (catId === 'ls') {
+        const straights = [
+          [1, 2, 3, 4, 5],
+          [2, 3, 4, 5, 6],
+        ];
+        for (const seq of straights) {
+          let missing = 0;
+          for (const num of seq) {
+            if (counts[num] === 0) missing++;
+          }
+          if (missing <= jokers) return 30;
+        }
+        return 0;
+      }
+
+      // 풀하우스 (3개 + 2개 동일 눈 -> 주사위 5개 총합, 조커는 최대 합이 되도록 배정)
+      if (catId === 'fh') {
+        let bestSum = 0;
+        // 가능한 모든 (트리플 눈 a, 페어 눈 b) 조합 탐색 (a === b인 요트 형태도 풀하우스 허용)
+        for (let a = 1; a <= 6; a++) {
+          for (let b = 1; b <= 6; b++) {
+            if (a === b) {
+              // 5개 모두 같은 눈인 경우
+              if (counts[a] + jokers >= 5) {
+                bestSum = Math.max(bestSum, a * 5);
+              }
+            } else {
+              const needA = Math.max(0, 3 - counts[a]);
+              const needB = Math.max(0, 2 - counts[b]);
+              if (needA + needB <= jokers && counts[a] + counts[b] + jokers === 5) {
+                bestSum = Math.max(bestSum, a * 3 + b * 2);
+              }
+            }
+          }
+        }
+        return bestSum;
+      }
+
+      return 0;
+    }
+
+    // 현재 보드에서 꼼수 1회(밑장 눈으로 1개 교체) 적용 시 각 족보별 최고 점수 계산
+    function getBestCheatForCategory(catId, vals, bottomFace) {
+      let bestScore = -1;
+      let bestReplaceIdx = -1;
+      let replacedFrom = null;
+
+      for (let i = 0; i < 5; i++) {
+        if (vals[i] === bottomFace) continue;
+        const copy = [...vals];
+        copy[i] = bottomFace;
+        const sc = scoreCategory(catId, copy);
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestReplaceIdx = i;
+          replacedFrom = vals[i];
+        }
+      }
+      return { score: bestScore, replaceIdx: bestReplaceIdx, replacedFrom };
+    }
+
+    // =========================================================================
+    // 2. 전략 가치 평가 & 몬테카를로 기댓값(EV) 시뮬레이션 엔진
+    // =========================================================================
+    function getUpperProgress() {
+      let upperSum = 0;
+      let openUpper = [];
+      for (const c of CATEGORIES) {
+        if (c.section === 'upper') {
+          if (state.scores[c.id] !== undefined) {
+            upperSum += state.scores[c.id];
+          } else {
+            openUpper.push(c);
+          }
+        }
+      }
+      return { upperSum, openUpper, bonusAchieved: upperSum >= 55 };
+    }
+
+    /**
+     * 특정 최종 주사위 눈 배열(vals)을 현재 열린 족보 중 하나에 등록할 때의
+     * "전략적 종합 가치(Strategic Utility)"를 반환합니다.
+     * - 단순 점수뿐 아니라 상단 보너스(+40점) 달성 기여도, 족보 희소성, 꼼수 비용을 반영
+     */
+    function evaluateFinalBoard(vals, openCats, upperSum, openUpperCount, cheatsLeft, bottomFace) {
+      let bestUtility = -Infinity;
+      let bestPlan = null;
+
+      // 상단 보너스까지 남은 점수 및 남은 상단 칸의 기대 획득 가능 점수 추정
+      const neededForBonus = Math.max(0, 55 - upperSum);
+      const bonusAlreadyLocked = upperSum >= 55;
+
+      // 꼼수 1회당 기회비용 (후반일수록, 보너스/요트 결정적일수록 가치 상승)
+      const roundsLeft = openCats.length;
+      const cheatOpportunityCost = cheatsLeft === 2 ? 9.5 : (roundsLeft <= 2 ? 4.0 : 12.0);
+
+      for (const cat of openCats) {
+        // 1) 꼼수 미사용 평가
+        const rawScore = scoreCategory(cat.id, vals);
+        const utilNoCheat = computeCategoryUtility(cat, rawScore, upperSum, openUpperCount, bonusAlreadyLocked, neededForBonus, roundsLeft);
+
+        if (utilNoCheat > bestUtility) {
+          bestUtility = utilNoCheat;
+          bestPlan = {
+            catId: cat.id,
+            catName: cat.name,
+            score: rawScore,
+            useCheat: false,
+            utility: utilNoCheat,
+          };
+        }
+
+        // 2) 꼼수 1회 사용 평가 (남은 꼼수가 1개 이상일 때)
+        if (cheatsLeft > 0) {
+          const cheatRes = getBestCheatForCategory(cat.id, vals, bottomFace);
+          if (cheatRes.score > rawScore) {
+            const utilWithCheat = computeCategoryUtility(cat, cheatRes.score, upperSum, openUpperCount, bonusAlreadyLocked, neededForBonus, roundsLeft) - cheatOpportunityCost;
+            if (utilWithCheat > bestUtility) {
+              bestUtility = utilWithCheat;
+              bestPlan = {
+                catId: cat.id,
+                catName: cat.name,
+                score: cheatRes.score,
+                rawScore,
+                useCheat: true,
+                replaceIdx: cheatRes.replaceIdx,
+                replacedFrom: cheatRes.replacedFrom,
+                utility: utilWithCheat,
+              };
+            }
+          }
+        }
+      }
+
+      return bestPlan;
+    }
+
+    function computeCategoryUtility(cat, score, upperSum, openUpperCount, bonusAlreadyLocked, neededForBonus, roundsLeft) {
+      let utility = score;
+
+      if (cat.section === 'upper') {
+        const par = cat.targetFace * 3; // 기준치 (3개 = par)
+        const diffFromPar = score - par;
+
+        if (!bonusAlreadyLocked) {
+          if (upperSum + score >= 55) {
+            // 이 등록으로 상단 보너스 55점을 즉시 확정 짓는 경우
+            utility += 38.0;
+          } else if (openUpperCount === 1) {
+            // 마지막 상단 칸인데 55점을 못 넘기면 보너스 40점 증발 패널티
+            utility -= 28.0;
+          } else {
+            // 기준치(3개) 대비 초과/미달분에 보너스 가중치 부여
+            utility += diffFromPar * 1.45;
+            // 0점 손절 방어: 기준치 절반 미만으로 등록할 때는 보너스 난이도 상승 패널티
+            if (score < cat.targetFace * 2) {
+              utility -= (cat.targetFace * 2 - score) * 1.1;
+            }
+          }
+        }
+      } else {
+        // 하단 족보 가치 보정
+        if (cat.id === 'yacht') {
+          if (score === 50) {
+            utility += 8.0; // 요트 완성 보너스 가산
+          } else {
+            // 요트를 0점으로 버리는 것은 다른 칸 0점보다 아쉬우나, 후반(1~2라운드 남음)에는 손절 허용
+            utility -= roundsLeft > 2 ? 14.0 : 5.0;
+          }
+        } else if (cat.id === 'ls') {
+          if (score === 0) utility -= roundsLeft > 2 ? 11.0 : 4.0;
+        } else if (cat.id === 'fh') {
+          if (score === 0) utility -= roundsLeft > 2 ? 9.0 : 3.5;
+          else if (score >= 22) utility += 2.5;
+        }
+      }
+
+      return utility;
+    }
+
+    // 주사위 1개 샘플링 (초록 주사위는 조커 0 확률이 약 28%, 일반 주사위는 약 10%)
+    function rollSingleDie(isGreen) {
+      const r = Math.random();
+      if (isGreen) {
+        if (r < 0.28) return 0; // 초록 주사위 조커 고확률
+        return 1 + Math.floor(((r - 0.28) / 0.72) * 6);
+      } else {
+        if (r < 0.10) return 0; // 일반 주사위 조커 기본 확률
+        return 1 + Math.floor(((r - 0.10) / 0.90) * 6);
+      }
+    }
+
+    /**
+     * 현재 주사위 상태와 굴림 차수(1, 2, 3)를 바탕으로
+     * 32가지 보관(Hold) 마스크 중 최고 기댓값(EV) 전략을 계산
+     */
+    function analyzeOptimalMove() {
+      const hasAllDice = state.dice.every(d => d.val !== null);
+      if (!hasAllDice) {
+        state.lastRecommendation = null;
+        renderRecommendation();
+        return;
+      }
+
+      const openCats = CATEGORIES.filter(c => state.scores[c.id] === undefined);
+      if (openCats.length === 0) return;
+
+      const { upperSum, openUpper } = getUpperProgress();
+      const openUpperCount = openUpper.length;
+      const vals = state.dice.map(d => d.val);
+      const greens = state.dice.map(d => d.green);
+
+      // 3차(최종) 굴림일 때는 더 이상 재굴림이 없으므로 즉시 최적 등록/꼼수 여부 결정
+      if (state.rollStage >= 3) {
+        const finalPlan = evaluateFinalBoard(vals, openCats, upperSum, openUpperCount, state.cheatsLeft, state.bottomFace);
+        state.lastRecommendation = {
+          stage: 3,
+          holdMask: [true, true, true, true, true],
+          ev: finalPlan.utility,
+          finalPlan,
+        };
+        renderRecommendation();
+        return;
+      }
+
+      // 1차 또는 2차 굴림: 32가지 보관 조합(mask = 0..31) 시뮬레이션
+      const remainingRolls = 3 - state.rollStage; // 1차면 2번 남음, 2차면 1번 남음
+      const SIMS = remainingRolls === 1 ? 1400 : 900;
+
+      let bestMask = 0;
+      let bestEV = -Infinity;
+      let bestSamplePlan = null;
+
+      for (let mask = 0; mask < 32; mask++) {
+        // 재굴림할 인덱스 추출
+        const rerollIndices = [];
+        for (let i = 0; i < 5; i++) {
+          if (((mask >> i) & 1) === 0) rerollIndices.push(i);
+        }
+
+        // 5개 모두 보관(mask === 31)인 경우 시뮬레이션 불필요
+        if (rerollIndices.length === 0) {
+          const plan = evaluateFinalBoard(vals, openCats, upperSum, openUpperCount, state.cheatsLeft, state.bottomFace);
+          if (plan.utility > bestEV) {
+            bestEV = plan.utility;
+            bestMask = mask;
+            bestSamplePlan = plan;
+          }
+          continue;
+        }
+
+        let totalUtil = 0;
+        const categoryFreq = {};
+
+        for (let s = 0; s < SIMS; s++) {
+          const simVals = [...vals];
+
+          if (remainingRolls === 1) {
+            // 2차 -> 3차: 남은 1번만 굴리고 최종 평가
+            for (const idx of rerollIndices) {
+              simVals[idx] = rollSingleDie(greens[idx]);
+            }
+          } else {
+            // 1차 -> 2차 -> 3차: 1회 굴린 뒤 휴리스틱으로 유망 눈을 추가 홀드하고 1회 더 굴림
+            for (const idx of rerollIndices) {
+              simVals[idx] = rollSingleDie(greens[idx]);
+            }
+            const intermediateHold = quickHeuristicHold(simVals, openCats, upperSum);
+            for (let idx = 0; idx < 5; idx++) {
+              if (!intermediateHold[idx]) {
+                simVals[idx] = rollSingleDie(greens[idx]);
+              }
+            }
+          }
+
+          const plan = evaluateFinalBoard(simVals, openCats, upperSum, openUpperCount, state.cheatsLeft, state.bottomFace);
+          totalUtil += plan.utility;
+          categoryFreq[plan.catId] = (categoryFreq[plan.catId] || 0) + 1;
+        }
+
+        const avgEV = totalUtil / SIMS;
+        if (avgEV > bestEV) {
+          bestEV = avgEV;
+          bestMask = mask;
+          // 가장 빈번하게 달성되는 목표 족보 추출
+          let topCatId = openCats[0].id;
+          let topCount = -1;
+          for (const [cid, cnt] of Object.entries(categoryFreq)) {
+            if (cnt > topCount) {
+              topCount = cnt;
+              topCatId = cid;
+            }
+          }
+          const topCatObj = CATEGORIES.find(c => c.id === topCatId);
+          bestSamplePlan = {
+            catId: topCatId,
+            catName: topCatObj ? topCatObj.name : '',
+            prob: Math.round((topCount / SIMS) * 100),
+          };
+        }
+      }
+
+      const holdMask = [0, 1, 2, 3, 4].map(i => ((bestMask >> i) & 1) === 1);
+      state.lastRecommendation = {
+        stage: state.rollStage,
+        holdMask,
+        ev: bestEV,
+        targetPlan: bestSamplePlan,
+      };
+      renderRecommendation();
+    }
+
+    // 1차 -> 2차 시뮬레이션 내부에서 빠른 의사결정을 돕는 경량 휴리스틱 홀드
+    function quickHeuristicHold(vals, openCats, upperSum) {
+      const hold = [false, false, false, false, false];
+      // 조커(0)는 무조건 보관
+      for (let i = 0; i < 5; i++) {
+        if (vals[i] === 0) hold[i] = true;
+      }
+
+      // 라지 스트레이트가 열려있고 서로 다른 숫자가 4개 이상이면 스트레이트 홀드
+      const hasLS = openCats.some(c => c.id === 'ls');
+      if (hasLS) {
+        const unique = new Set(vals.filter(v => v > 0));
+        const jokers = vals.filter(v => v === 0).length;
+        if (unique.size + jokers >= 4) {
+          const seen = new Set();
+          for (let i = 0; i < 5; i++) {
+            if (vals[i] === 0) hold[i] = true;
+            else if (!seen.has(vals[i])) {
+              seen.add(vals[i]);
+              hold[i] = true;
+            }
+          }
+          return hold;
+        }
+      }
+
+      // 가장 개수가 많은 눈(동률이면 큰 눈 또는 열린 상단 눈) 보관
+      const counts = [0, 0, 0, 0, 0, 0, 0];
+      vals.forEach(v => { if (v > 0) counts[v]++; });
+      let bestFace = 6;
+      let bestScore = -1;
+      for (let f = 1; f <= 6; f++) {
+        if (counts[f] === 0) continue;
+        const isUpperOpen = openCats.some(c => c.targetFace === f);
+        const weight = counts[f] * 10 + (isUpperOpen ? 4 : 0) + f * 0.3;
+        if (weight > bestScore) {
+          bestScore = weight;
+          bestFace = f;
+        }
+      }
+      for (let i = 0; i < 5; i++) {
+        if (vals[i] === bestFace || vals[i] === 0) hold[i] = true;
+      }
+      return hold;
+    }
+
+    // =========================================================================
+    // 3. 키보드 & 입력 파싱 핸들러
+    // =========================================================================
+    function parseDiceTokens(rawStr) {
+      // 공백/쉼표 제거 후 숫자(0~6)와 뒤따르는 '*' 파싱
+      const cleaned = rawStr.replace(/[\s,/-]+/g, '');
+      const tokens = [];
+      for (let i = 0; i < cleaned.length; i++) {
+        const ch = cleaned[i];
+        if (ch >= '0' && ch <= '6') {
+          const isGreen = cleaned[i + 1] === '*';
+          if (isGreen) i++;
+          tokens.push({ val: parseInt(ch, 10), green: isGreen });
+        }
+      }
+      return tokens;
+    }
+
+    function handleDiceSubmit(e) {
+      e.preventDefault();
+      const input = document.getElementById('diceInput');
+      const tokens = parseDiceTokens(input.value);
+      if (tokens.length === 0) return;
+
+      const heldCount = state.dice.filter(d => d.held && d.val !== null).length;
+      const unheldCount = 5 - heldCount;
+
+      if (tokens.length === 5) {
+        // 5개 전체 새로 입력
+        state.dice = tokens.map(t => ({ val: t.val, green: t.green, held: false }));
+      } else if (heldCount > 0 && tokens.length === unheldCount) {
+        // 보관된 주사위는 유지하고, 재굴림(보관 해제)된 자리만 새 눈으로 채움 + 차수 자동 증가
+        let tIdx = 0;
+        for (let i = 0; i < 5; i++) {
+          if (!state.dice[i].held) {
+            state.dice[i] = {
+              val: tokens[tIdx].val,
+              green: tokens[tIdx].green,
+              held: false,
+            };
+            tIdx++;
+          }
+        }
+        if (state.rollStage < 3) {
+          state.rollStage++;
+        }
+      } else {
+        // 길이가 맞지 않으면 앞부분부터 채우되 안내 표시
+        for (let i = 0; i < Math.min(5, tokens.length); i++) {
+          state.dice[i] = { val: tokens[i].val, green: tokens[i].green, held: false };
+        }
+      }
+
+      input.value = '';
+      analyzeOptimalMove();
+
+      // 계산 직후 추천 보관 마스크를 주사위 슬롯에 자동 반영해 다음 재굴림 입력 준비!
+      if (state.rollStage < 3 && state.lastRecommendation && state.lastRecommendation.holdMask) {
+        for (let i = 0; i < 5; i++) {
+          state.dice[i].held = state.lastRecommendation.holdMask[i];
+        }
+      }
+
+      renderAll();
+      input.focus();
+    }
+
+    function toggleDieHold(idx) {
+      if (state.dice[idx].val === null) return;
+      state.dice[idx].held = !state.dice[idx].held;
+      renderDiceBoard();
+      updateInputPlaceholder();
+    }
+
+    function toggleDieGreen(idx, e) {
+      if (e) e.preventDefault();
+      if (state.dice[idx].val === null) return;
+      state.dice[idx].green = !state.dice[idx].green;
+      analyzeOptimalMove();
+      renderAll();
+    }
+
+    function applyRecommendedHold() {
+      if (!state.lastRecommendation || !state.lastRecommendation.holdMask) return;
+      for (let i = 0; i < 5; i++) {
+        state.dice[i].held = state.lastRecommendation.holdMask[i];
+      }
+      renderDiceBoard();
+      updateInputPlaceholder();
+      document.getElementById('diceInput').focus();
+    }
+
+    // =========================================================================
+    // 4. 족보 등록 & 라운드 진행 로직
+    // =========================================================================
+    function recordCategoryScore(catId, useCheat = false) {
+      if (state.scores[catId] !== undefined) return;
+      const vals = state.dice.map(d => d.val);
+      if (vals.some(v => v === null)) return;
+
+      // 실행취소용 스냅샷 저장
+      state.history.push(JSON.parse(JSON.stringify({
+        scores: state.scores,
+        cheatUsedRounds: state.cheatUsedRounds,
+        cheatsLeft: state.cheatsLeft,
+        dice: state.dice,
+        rollStage: state.rollStage,
+      })));
+
+      let finalScore = 0;
+      if (useCheat && state.cheatsLeft > 0) {
+        const cheatRes = getBestCheatForCategory(catId, vals, state.bottomFace);
+        finalScore = Math.max(scoreCategory(catId, vals), cheatRes.score);
+        state.cheatsLeft--;
+        state.cheatUsedRounds[catId] = true;
+      } else {
+        finalScore = scoreCategory(catId, vals);
+      }
+
+      state.scores[catId] = finalScore;
+
+      // 다음 라운드 초기화
+      state.rollStage = 1;
+      state.dice = [
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+        { val: null, green: false, held: false },
+      ];
+      state.lastRecommendation = null;
+
+      renderAll();
+      const input = document.getElementById('diceInput');
+      input.value = '';
+      input.focus();
+
+      // 8라운드 모두 완료 시 결과 모달 표시
+      if (Object.keys(state.scores).length === 8) {
+        showFinishSummary();
+      }
+    }
+
+    function undoLastAction() {
+      if (state.history.length === 0) return;
+      const prev = state.history.pop();
+      state.scores = prev.scores;
+      state.cheatUsedRounds = prev.cheatUsedRounds;
+      state.cheatsLeft = prev.cheatsLeft;
+      state.dice = prev.dice;
+      state.rollStage = prev.rollStage;
+      analyzeOptimalMove();
+      renderAll();
+    }
+
+    // =========================================================================
+    // 5. UI 컨트롤 & 렌더링 함수
+    // =========================================================================
+    function setBottomFace(face) {
+      state.bottomFace = face;
+      analyzeOptimalMove();
+      renderAll();
+      document.getElementById('diceInput').focus();
+    }
+
+    function cycleCheatCount() {
+      state.cheatsLeft = (state.cheatsLeft + 2) % 3; // 2 -> 1 -> 0 -> 2
+      analyzeOptimalMove();
+      renderAll();
+    }
+
+    function setRollStage(stage) {
+      state.rollStage = stage;
+      analyzeOptimalMove();
+      renderAll();
+      document.getElementById('diceInput').focus();
+    }
+
+    function updateInputPlaceholder() {
+      const input = document.getElementById('diceInput');
+      const badge = document.getElementById('inputHintBadge');
+      const hasAll = state.dice.every(d => d.val !== null);
+      const heldCount = state.dice.filter(d => d.held && d.val !== null).length;
+      const unheldCount = 5 - heldCount;
+
+      if (hasAll && heldCount > 0 && unheldCount > 0 && state.rollStage < 3) {
+        input.placeholder = `재굴림 ${unheldCount}개만 입력 (예: ${'4'.repeat(unheldCount)}) 또는 5개 전체`;
+        badge.textContent = `${unheldCount}개 입력`;
+        badge.className = 'absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/25 text-indigo-300 font-bold';
+      } else {
+        input.placeholder = '주사위 5개 입력 (예: 04453, 초록은 4*) + Enter';
+        badge.textContent = '5개 입력';
+        badge.className = 'absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400';
+      }
+    }
+
+    function renderTopControls() {
+      const completed = Object.keys(state.scores).length;
+      const currentRound = Math.min(8, completed + 1);
+      document.getElementById('roundBadge').textContent = `${currentRound} / 8 라운드`;
+
+      // 밑장 눈 버튼 0~6
+      const bfGroup = document.getElementById('bottomFaceGroup');
+      bfGroup.innerHTML = [0, 1, 2, 3, 4, 5, 6].map(num => {
+        const active = state.bottomFace === num;
+        return `<button type="button" onclick="setBottomFace(${num})"
+          class="w-6 h-6 rounded text-xs font-mono font-extrabold transition ${
+            active
+              ? 'bg-amber-500 text-slate-950 shadow-sm'
+              : 'bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-white'
+          }">${num}</button>`;
+      }).join('');
+
+      // 남은 꼼수 표시
+      const filled = '●'.repeat(state.cheatsLeft);
+      const empty = '○'.repeat(2 - state.cheatsLeft);
+      document.getElementById('cheatDots').textContent = filled + empty;
+
+      // 실행취소 버튼 상태
+      document.getElementById('undoBtn').disabled = state.history.length === 0;
+
+      // 굴림 차수 버튼 스타일
+      document.querySelectorAll('.roll-stage-btn').forEach(btn => {
+        const st = parseInt(btn.dataset.stage, 10);
+        if (st === state.rollStage) {
+          btn.className = 'roll-stage-btn px-2.5 py-1 rounded-md text-xs font-extrabold bg-indigo-600 text-white shadow-sm transition';
+        } else {
+          btn.className = 'roll-stage-btn px-2.5 py-1 rounded-md text-xs font-bold text-slate-400 hover:text-white transition';
+        }
+      });
+    }
+
+    function renderDiceBoard() {
+      const board = document.getElementById('diceBoard');
+      const recHold = state.lastRecommendation?.holdMask || [false, false, false, false, false];
+
+      board.innerHTML = state.dice.map((d, idx) => {
+        const isEmpty = d.val === null;
+        const isRecHold = !isEmpty && recHold[idx] && state.rollStage < 3;
+
+        let borderClass = 'border-slate-800 bg-slate-950/70';
+        if (!isEmpty) {
+          if (d.held) {
+            borderClass = 'border-indigo-500 bg-indigo-950/50 shadow-md shadow-indigo-950/40';
+          } else if (d.green) {
+            borderClass = 'border-emerald-500/70 bg-emerald-950/25';
+          } else {
+            borderClass = 'border-slate-700 bg-slate-900';
+          }
+        }
+
+        const faceLabel = isEmpty ? '-' : (d.val === 0 ? '0' : d.val);
+        const faceColor = d.val === 0
+          ? 'text-amber-300'
+          : (d.green ? 'text-emerald-300' : 'text-white');
+
+        return `
+          <div onclick="toggleDieHold(${idx})" oncontextmenu="toggleDieGreen(${idx}, event)"
+            class="die-card cursor-pointer rounded-xl border-2 ${borderClass} p-2 flex flex-col items-center justify-between relative min-h-[76px]">
+            
+            <!-- 상단 상태 뱃지 (보관 / 재굴림) -->
+            <div class="w-full flex items-center justify-between text-[10px] font-bold">
+              <span class="${d.held ? 'text-indigo-300' : 'text-slate-500'}">
+                ${isEmpty ? `#${idx + 1}` : (d.held ? '보관' : '굴림')}
+              </span>
+              ${isRecHold ? '<span class="px-1 rounded bg-indigo-500/30 text-indigo-200 text-[9px]">추천</span>' : ''}
+            </div>
+
+            <!-- 중앙 주사위 눈 -->
+            <div class="font-mono text-2xl sm:text-3xl font-extrabold ${faceColor} leading-none my-1">
+              ${faceLabel}${!isEmpty && d.green ? '<span class="text-emerald-400 text-base align-top">*</span>' : ''}
+            </div>
+
+            <!-- 하단 초록 주사위 토글 버튼 -->
+            <button type="button" onclick="event.stopPropagation(); toggleDieGreen(${idx})"
+              class="w-full py-0.5 rounded text-[10px] font-bold transition ${
+                d.green
+                  ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
+              }">
+              ${d.green ? '초록(*)' : '일반'}
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderRecommendation() {
+      const holdEl = document.getElementById('recHoldLine');
+      const targetEl = document.getElementById('recTargetLine');
+      const cheatEl = document.getElementById('recCheatLine');
+      const evEl = document.getElementById('evMetric');
+
+      const rec = state.lastRecommendation;
+      if (!rec) {
+        evEl.textContent = '대기 중';
+        holdEl.textContent = '주사위 5개를 입력하면 최적 보관 조합을 계산합니다.';
+        targetEl.textContent = '-';
+        cheatEl.textContent = state.cheatsLeft > 0
+          ? `남은 꼼수 ${state.cheatsLeft}회 (밑장 눈: ${state.bottomFace})`
+          : '남은 꼼수 없음 (정석 플레이)';
+        return;
+      }
+
+      evEl.textContent = `기댓값 ${rec.ev.toFixed(1)}점`;
+
+      if (rec.stage >= 3 && rec.finalPlan) {
+        // 3차(최종) 굴림 결과 지침
+        const p = rec.finalPlan;
+        holdEl.innerHTML = `<span class="text-emerald-400">[최종 등록]</span> 아래 점수판에서 <span class="underline decoration-indigo-400 underline-offset-2 text-indigo-300">${p.catName} (${p.score}점)</span> 칸을 클릭하세요.`;
+        targetEl.textContent = `${p.catName} 확정 (${p.score}점)`;
+
+        if (p.useCheat) {
+          cheatEl.innerHTML = `<span class="text-amber-300 font-extrabold">꼼수 1회 사용!</span> [${p.replacedFrom}] 눈을 밑장 [${state.bottomFace}]으로 교체 (${p.rawScore}점 → ${p.score}점)`;
+        } else {
+          cheatEl.textContent = state.cheatsLeft > 0
+            ? `꼼수 아끼기 (남은 ${state.cheatsLeft}회 온존)`
+            : '꼼수 소진 상태 — 그대로 등록';
+        }
+      } else {
+        // 1차 또는 2차 굴림 보관 지침
+        const kept = [];
+        const rerolled = [];
+        state.dice.forEach((d, idx) => {
+          const label = `${d.val}${d.green ? '*' : ''}`;
+          if (rec.holdMask[idx]) kept.push(label);
+          else rerolled.push(label);
+        });
+
+        const keptStr = kept.length > 0 ? kept.join(', ') : '없음 (5개 전부 재굴림)';
+        const rerollStr = rerolled.length > 0 ? `${rerolled.join(', ')} (${rerolled.length}개 다시 굴리기)` : '재굴림 없음 (그대로 확정)';
+
+        holdEl.innerHTML = `<span class="text-indigo-300">[${keptStr}]</span> 보관 · <span class="text-slate-400 text-xs">${rerollStr}</span>`;
+        targetEl.textContent = rec.targetPlan
+          ? `${rec.targetPlan.catName} 주력 (달성 유력도 ${rec.targetPlan.prob}%)`
+          : '-';
+        cheatEl.textContent = state.cheatsLeft > 0
+          ? `꼼수 보류 (남은 ${state.cheatsLeft}회 · 밑장 ${state.bottomFace}) — 3차 굴림 후 최종 판단`
+          : '남은 꼼수 없음';
+      }
+    }
+
+    function renderScorecard() {
+      const { upperSum, openUpper, bonusAchieved } = getUpperProgress();
+      const bonusPoints = bonusAchieved ? 40 : 0;
+
+      let lowerSum = 0;
+      for (const c of CATEGORIES) {
+        if (c.section === 'lower' && state.scores[c.id] !== undefined) {
+          lowerSum += state.scores[c.id];
+        }
+      }
+      const totalScore = upperSum + bonusPoints + lowerSum;
+
+      // 상단 보너스 바 업데이트
+      document.getElementById('upperSumText').textContent = upperSum;
+      document.getElementById('totalScoreText').textContent = totalScore;
+
+      const pct = Math.min(100, Math.round((upperSum / 55) * 100));
+      document.getElementById('upperProgressBar').style.width = `${pct}%`;
+
+      const statusBadge = document.getElementById('upperBonusStatus');
+      const paceText = document.getElementById('upperPaceText');
+
+      if (bonusAchieved) {
+        statusBadge.textContent = '+40점 달성 완료!';
+        statusBadge.className = 'px-1.5 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+        paceText.textContent = '상단 보너스 확정! 남은 라운드는 고득점·요트 집중';
+      } else {
+        const rem = 55 - upperSum;
+        statusBadge.textContent = `${rem}점 남음`;
+        statusBadge.className = 'px-1.5 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-amber-300';
+        if (openUpper.length > 0) {
+          const avgNeeded = (rem / openUpper.length).toFixed(1);
+          paceText.textContent = `남은 상단 ${openUpper.length}칸 평균 ${avgNeeded}점 필요`;
+        } else {
+          paceText.textContent = '상단 마감 (보너스 미달성)';
+        }
+      }
+
+      // 8개 족보 카드 렌더링
+      const grid = document.getElementById('scorecardGrid');
+      const hasDice = state.dice.every(d => d.val !== null);
+      const vals = state.dice.map(d => d.val);
+      const recCatId = state.lastRecommendation?.finalPlan?.catId || state.lastRecommendation?.targetPlan?.catId;
+      const recUseCheat = state.lastRecommendation?.finalPlan?.useCheat || false;
+
+      grid.innerHTML = CATEGORIES.map(cat => {
+        const isFilled = state.scores[cat.id] !== undefined;
+        const isRecommended = !isFilled && recCatId === cat.id && hasDice;
+
+        if (isFilled) {
+          const usedCheat = state.cheatUsedRounds[cat.id];
+          return `
+            <div class="rounded-lg border border-slate-800/80 bg-slate-950/60 px-3 py-2 flex items-center justify-between opacity-75">
+              <div class="flex items-center gap-2">
+                <span class="w-6 text-center font-mono text-xs font-bold text-slate-500">${cat.short}</span>
+                <span class="text-xs font-bold text-slate-400 line-through">${cat.name}</span>
+                ${usedCheat ? '<span class="text-[10px] px-1 rounded bg-amber-500/15 text-amber-400">꼼수</span>' : ''}
+              </div>
+              <span class="font-mono text-sm font-extrabold text-slate-300">${state.scores[cat.id]}점</span>
+            </div>
+          `;
+        }
+
+        // 미등록 칸: 현재 주사위 기준 즉시 획득 가능 점수 계산
+        const rawPreview = hasDice ? scoreCategory(cat.id, vals) : null;
+        const cheatPreview = (hasDice && state.cheatsLeft > 0)
+          ? getBestCheatForCategory(cat.id, vals, state.bottomFace).score
+          : null;
+        const showCheatBtn = hasDice && state.cheatsLeft > 0 && cheatPreview > rawPreview;
+
+        const highlightClass = isRecommended
+          ? 'border-indigo-500 bg-indigo-950/40 ring-1 ring-indigo-500/40'
+          : 'border-slate-800 bg-slate-950 hover:border-slate-700';
+
+        return `
+          <div class="rounded-lg border ${highlightClass} px-2.5 py-2 flex items-center justify-between gap-1.5 transition">
+            <button type="button" onclick="recordCategoryScore('${cat.id}', false)" ${!hasDice ? 'disabled' : ''}
+              class="flex-1 flex items-center justify-between text-left disabled:cursor-default group">
+              <div class="flex items-center gap-2">
+                <span class="w-6 text-center font-mono text-xs font-extrabold ${cat.section === 'upper' ? 'text-sky-400' : 'text-purple-400'}">${cat.short}</span>
+                <span class="text-xs font-bold text-slate-100 group-hover:text-indigo-300 transition">${cat.name}</span>
+              </div>
+              <span class="font-mono text-xs font-extrabold ${
+                hasDice
+                  ? (rawPreview > 0 ? 'text-emerald-400' : 'text-slate-500')
+                  : 'text-slate-600'
+              }">
+                ${hasDice ? `+${rawPreview}점` : '-'}
+              </span>
+            </button>
+
+            ${showCheatBtn ? `
+              <button type="button" onclick="recordCategoryScore('${cat.id}', true)"
+                title="꼼수 1회(밑장 ${state.bottomFace})를 사용하여 ${cheatPreview}점으로 즉시 등록"
+                class="px-1.5 py-0.5 rounded text-[11px] font-mono font-extrabold transition shrink-0 ${
+                  isRecommended && recUseCheat
+                    ? 'bg-amber-500 text-slate-950 animate-pulse'
+                    : 'bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/35'
+                }">
+                꼼수 +${cheatPreview}
+              </button>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderAll() {
+      renderTopControls();
+      renderDiceBoard();
+      renderRecommendation();
+      renderScorecard();
+      updateInputPlaceholder();
+    }
+
+    // =========================================================================
+    // 6. 모달 및 전역 단축키 설정
+    // =========================================================================
+    function openResetModal() {
+      const m = document.getElementById('resetModal');
+      m.classList.remove('hidden');
+      m.classList.add('flex');
+    }
+
+    function closeResetModal() {
+      const m = document.getElementById('resetModal');
+      m.classList.add('hidden');
+      m.classList.remove('flex');
+    }
+
+    function confirmResetGame() {
+      closeResetModal();
+      closeFinishModal();
+      state = {
+        bottomFace: state.bottomFace, // 밑장 눈 설정은 유지하거나 필요시 변경
+        cheatsLeft: 2,
+        rollStage: 1,
+        dice: [
+          { val: null, green: false, held: false },
+          { val: null, green: false, held: false },
+          { val: null, green: false, held: false },
+          { val: null, green: false, held: false },
+          { val: null, green: false, held: false },
+        ],
+        scores: {},
+        cheatUsedRounds: {},
+        history: [],
+        lastRecommendation: null,
+      };
+      renderAll();
+      document.getElementById('diceInput').focus();
+    }
+
+    function showFinishSummary() {
+      const { upperSum, bonusAchieved } = getUpperProgress();
+      const bonus = bonusAchieved ? 40 : 0;
+      let lowerSum = 0;
+      for (const c of CATEGORIES) {
+        if (c.section === 'lower') lowerSum += (state.scores[c.id] || 0);
+      }
+      const total = upperSum + bonus + lowerSum;
+      document.getElementById('finalTotalScore').textContent = `${total}점`;
+      document.getElementById('finalBreakdown').textContent = `상단 ${upperSum}점 + 보너스 ${bonus}점 + 하단 ${lowerSum}점`;
+      const m = document.getElementById('finishModal');
+      m.classList.remove('hidden');
+      m.classList.add('flex');
+    }
+
+    function closeFinishModal() {
+      const m = document.getElementById('finishModal');
+      m.classList.add('hidden');
+      m.classList.remove('flex');
+    }
+
+    // Alt + 0~6 단축키로 밑장 눈 즉시 변경
+    window.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key >= '0' && e.key <= '6') {
+        e.preventDefault();
+        setBottomFace(parseInt(e.key, 10));
+      }
+    });
+
+    // 초기 렌더링 및 입력창 포커스
+    window.onload = () => {
+      renderAll();
+      document.getElementById('diceInput').focus();
+    };
+  </script>
+</body>
+</html>
