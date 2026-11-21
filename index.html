@@ -735,9 +735,11 @@
       for (let i = 0; i < cleaned.length; i++) {
         const ch = cleaned[i];
         if (ch >= '0' && ch <= '6') {
-          const isGreen = cleaned[i + 1] === '*';
+          const val = parseInt(ch, 10);
+          let isGreen = cleaned[i + 1] === '*';
           if (isGreen) i++;
-          tokens.push({ val: parseInt(ch, 10), green: isGreen });
+          if (val === 0) isGreen = true; // 0 눈은 무조건 에르핀 눈 주사위(초록)
+          tokens.push({ val, green: isGreen });
         }
       }
       return tokens;
@@ -798,6 +800,10 @@
     function toggleDieGreen(idx, e) {
       if (e) e.preventDefault();
       if (state.dice[idx].val === null) return;
+      if (state.dice[idx].val === 0) {
+        state.dice[idx].green = true;
+        return;
+      }
       state.dice[idx].green = !state.dice[idx].green;
       analyzeOptimalMove();
       renderAll();
@@ -955,24 +961,24 @@
         const isRecHold = !isEmpty && recHold[idx] && state.rollStage < 3;
 
         // 보관 중인 주사위는 원색(선명한 황금/노란색 테두리 + 링 + 원색 배지)으로 확 띄게 강조
+        const isErpinDie = !isEmpty && (d.green || d.val === 0);
+
         let borderClass = 'border-slate-800 bg-slate-950/70';
         if (!isEmpty) {
           if (d.held) {
             borderClass = 'border-amber-400 bg-amber-500/20 ring-2 ring-amber-400 shadow-lg shadow-amber-500/30';
-          } else if (d.green) {
-            borderClass = 'border-emerald-500/70 bg-emerald-950/25';
+          } else if (isErpinDie) {
+            borderClass = 'border-emerald-400 bg-emerald-950/45 shadow-md shadow-emerald-500/20';
           } else {
             borderClass = 'border-slate-700 bg-slate-900';
           }
         }
 
         const faceLabel = isEmpty ? '-' : (d.val === 0 ? '0' : d.val);
-        // 보관 중인 주사위 숫자도 강렬한 원색 옐로우(#fde047)로 대비 극대화
+        // 보관 중인 주사위 숫자도 강렬한 원색 옐로우(#fde047)로 대비 극대화, 0 눈은 초록색 에르핀 눈으로 표시
         const faceColor = d.held
           ? 'text-yellow-300 drop-shadow-[0_0_8px_rgba(250,204,21,0.55)]'
-          : (d.val === 0
-              ? 'text-amber-300'
-              : (d.green ? 'text-emerald-300' : 'text-white'));
+          : (isErpinDie ? 'text-emerald-400 drop-shadow-[0_0_6px_rgba(52,211,153,0.45)]' : 'text-white');
 
         return `
           <div onclick="toggleDieHold(${idx})" oncontextmenu="toggleDieGreen(${idx}, event)"
@@ -994,17 +1000,17 @@
 
             <!-- 중앙 주사위 눈 -->
             <div class="font-mono text-2xl sm:text-3xl font-extrabold ${faceColor} leading-none my-1">
-              ${faceLabel}${!isEmpty && d.green ? '<span class="text-emerald-400 text-base align-top">*</span>' : ''}
+              ${faceLabel}${isErpinDie ? '<span class="text-emerald-400 text-base align-top">*</span>' : ''}
             </div>
 
             <!-- 하단 에르핀 눈 주사위 토글 버튼 -->
             <button type="button" onclick="event.stopPropagation(); toggleDieGreen(${idx})"
               class="w-full py-0.5 rounded text-[10px] font-bold transition ${
-                d.green
+                isErpinDie
                   ? 'bg-emerald-500 text-slate-950 font-extrabold'
                   : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
               }">
-              ${d.green ? '에르핀(*)' : '일반'}
+              ${isErpinDie ? '에르핀(*)' : '일반'}
             </button>
           </div>
         `;
