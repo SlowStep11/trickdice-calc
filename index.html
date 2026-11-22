@@ -282,14 +282,22 @@
       // 밑장 눈 숫자(0~6)에 따른 기본 유보 기준(기회비용)
       // 조커(0)와 6은 고득점·족보 완성 가치가 매우 높고, 2~3은 후반 갈수록 가치가 급락
       const baseCostMap = {
-        0: 14.5, // 만능 에르핀 눈
+        0: 14.5, // 만능 에르핀 눈 (11110 보너스 요트 포함)
         6: 13.0, // 고득점 핵심
         5: 10.5, // 상단 보너스·풀하우스
         4: 8.5,  // 스트레이트·상단
         3: 6.0,  // 초중반 처리용
         2: 4.2,  // 아끼지 말고 소모
-        1: 3.0   // 즉시 이득 시 사용
+        1: 7.5   // 11110 보너스 요트(70점) 핵심 트리거
       };
+
+      // 요트가 아직 열려 있고 밑장이 1 또는 0이면 11110(70점) 각을 볼 수 있으므로 가치 보존
+      if (scores['yacht'] === undefined && (bottomFace === 1 || bottomFace === 0)) {
+        cost = Math.max(cost, bottomFace === 0 ? 15.0 : 8.5);
+      } else if (scores['yacht'] !== undefined && bottomFace === 1) {
+        // 이미 요트 칸이 채워졌다면 밑장 1은 상단 칸도 없으므로 가치가 최저로 하락
+        cost = 2.5;
+      }
 
       let cost = baseCostMap[bottomFace] !== undefined ? baseCostMap[bottomFace] : 8.5;
 
@@ -339,12 +347,13 @@
         else counts[vals[i]]++;
       }
 
-      // 요트 (5 of a kind -> 기본 50점, 에르핀 눈(0) 포함 보너스 요트 시 70점)
+      // 요트 (5 of a kind -> 기본 50점, 11110 조합(1 네 개 + 에르핀 눈 한 개)만 보너스 요트 70점)
       if (catId === 'yacht') {
-        if (jokers === 5) return 70;
+        if (counts[1] === 4 && jokers === 1) return 70;
+        if (jokers === 5) return 50;
         for (let f = 1; f <= 6; f++) {
           if (counts[f] + jokers >= 5) {
-            return jokers > 0 ? 70 : 50;
+            return 50;
           }
         }
         return 0;
@@ -701,11 +710,16 @@
       vals.forEach(v => { if (v > 0) counts[v]++; });
       let bestFace = 6;
       let bestScore = -1;
+      const hasYachtOpen = openCats.some(c => c.id === 'yacht');
+      const jokersCount = vals.filter(v => v === 0).length;
+
       for (let f = 1; f <= 6; f++) {
         if (counts[f] === 0) continue;
         const isUpperOpen = openCats.some(c => c.targetFace === f);
         const bonusBoost = (isUpperOpen && bonusPossible && upperSum < 55) ? 4.5 : (isUpperOpen ? 2.5 : 0);
-        const weight = counts[f] * 10 + bonusBoost + f * 0.35;
+        // 요트 칸이 열려 있고 1이 2개 이상(특히 0과 함께) 잡혔을 때 11110(70점) 보너스 요트 기대치 가산
+        const bonusYachtBoost = (f === 1 && hasYachtOpen && (counts[1] + jokersCount >= 3)) ? 6.5 : 0;
+        const weight = counts[f] * 10 + bonusBoost + bonusYachtBoost + f * 0.35;
         if (weight > bestScore) {
           bestScore = weight;
           bestFace = f;
